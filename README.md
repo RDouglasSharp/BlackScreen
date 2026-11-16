@@ -61,6 +61,10 @@ to **Run Program** and point it at `BlackScreen.exe`. (Win+Shift+B isn't used by
 Windows or by PowerToys' defaults. Avoid Win+Ctrl+Shift+B, which resets the graphics
 driver.) Only one copy runs at a time, so pressing it twice is harmless.
 
+If the hotkey does nothing, check the program path in the editor. A leading space
+or trailing full stop picked up by copy-paste breaks it silently. Also note the
+editor records which Win/Shift key you pressed (e.g. "Win (Left)").
+
 ## Build
 
 Uses the C# compiler that ships with Windows (.NET Framework 4.x), no SDK needed:
