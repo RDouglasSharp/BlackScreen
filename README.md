@@ -50,6 +50,9 @@ active power plan and only while it runs.
 ## Usage
 
 1. Download `BlackScreen.exe` from [Releases](../../releases), or build it (below).
+   The exe isn't code-signed, so the first time you run it Windows SmartScreen may
+   say "Windows protected your PC". Click **More info → Run anyway**. (Or build it
+   yourself from the ~200 lines of source.)
 2. Start your GPU job, run `BlackScreen.exe`, walk away.
 3. Come back and click (or press Esc).
 
