@@ -12,6 +12,39 @@ test, a GPU job running at ~65 W fell to **~5 W within seconds** of the 2-minute
 display timeout, while still reporting 96% utilisation. The job didn't stop, it just
 crawled. Waking the screen brought it straight back to ~65 W.
 
+### Why: Modern Standby
+
+This laptop, like all Windows on ARM laptops and many recent x64 ones, uses
+**Modern Standby** (S0 Low Power Idle) instead of classic S3 sleep. It works like
+a phone: when the display turns off for inactivity, Windows enters standby, and
+the platform cuts power to everything, including a GPU that's busy with your job.
+**This happens even with Sleep set to Never.** On a Modern Standby machine, the
+display timeout is effectively the sleep timeout.
+
+You can see it in the Windows System event log. From our test (display timeout
+2 min, sleep Never):
+
+| Time     | GPU                 | System log (Kernel-Power)                             |
+|----------|---------------------|-------------------------------------------------------|
+| 00:58:44 | 64.6 W, 96 %        |                                                       |
+| 00:58:48 |                     | 506: Entering Modern Standby. Reason: Idle Timeout    |
+| 00:58:50 | **5.3 W, 96 %**     |                                                       |
+| 00:59:12 |                     | 507: Exiting Modern Standby. Reason: Input Touchpad   |
+| 00:59:17 | 56 W → ~65 W        |                                                       |
+
+Check your own machine (no admin needed):
+
+```powershell
+powercfg /a    # "Standby (S0 Low Power Idle)" means Modern Standby
+Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows-Kernel-Power';Id=506,507} -MaxEvents 20 |
+  Format-List TimeCreated,Message
+```
+
+So a keep-awake tool needs its "keep screen on" option for this. Keeping the
+*display* on is what keeps standby away, and that's why BlackScreen keeps the
+display on but black.
+(Thanks to the Reddit commenter who pointed at Modern Standby.)
+
 Anything that turns the panel off or dims it can do this:
 
 - Display timeout ("Turn off my screen after…")
