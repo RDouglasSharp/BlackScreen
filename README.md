@@ -76,8 +76,9 @@ icon if `BlackScreen.ico` is missing.
 
 - Leave "Detect when other people are looking at my screen" off. BlackScreen doesn't
   override it, and it dims the screen.
-- If your laptop's maker has its own dimming or eye-tracking feature (e.g. in
-  MyASUS), it may need to be off as well.
+- Vendor features BlackScreen can't control need to stay off. On ASUS, that's
+  **MyASUS → Customization → OLED Care → Pixel Refresh**, which blanks the panel
+  when idle even with Windows' screen saver set to None.
 - Tested on Windows 11 (ARM64) on an ASUS laptop with an RTX Spark N1X. Other
   machines may throttle for different reasons; check your GPU power draw
   (`nvidia-smi`) with the display on and off.
