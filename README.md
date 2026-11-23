@@ -85,9 +85,58 @@ active power plan and only while it runs.
 1. Download `BlackScreen.exe` from [Releases](../../releases), or build it (below).
    The exe isn't code-signed, so the first time you run it Windows SmartScreen may
    say "Windows protected your PC". Click **More info → Run anyway**. (Or build it
-   yourself from the ~200 lines of source.)
+   yourself from the ~700 lines of source.)
 2. Start your GPU job, run `BlackScreen.exe`, walk away.
 3. Come back and click (or press Esc).
+
+## Auto mode (`BlackScreen.exe --auto`)
+
+Manual mode is for "I'm walking away now". Auto mode is for everyday use: it stays in the
+tray and **replaces Windows' own screen-off, dim and "lock when I leave" on AC power**,
+so you get the convenience of those features without the throttle.
+
+On AC power, set Windows' display-off, dim, "turn off my screen when I leave" and
+"dim my screen when I look away" to **Never**, then run `BlackScreen.exe --auto`. It
+handles those jobs itself:
+
+- **No input for 5 minutes:** black out. Skipped while the presence sensor sees you
+  looking at the screen, or while an app asks Windows to keep the display on (a video
+  playing in a browser or player does this).
+- **The presence sensor says you've left for 30 s:** black out. This needs no keyboard
+  or mouse input in that time either, and is skipped while a video is playing (see the
+  dark-room note below).
+- **Any input, or the sensor sees you come back:** the screen comes back.
+- **Blacked out with no input for 15 minutes:** a real Windows lock (as Win+L).
+- **On the lock screen:** Windows normally turns the display off after a minute there
+  ("console lock display off timeout"), which throttles the GPU just the same. Auto
+  mode keeps it at Never. To protect the panel from the static lock-screen clock, it
+  turns the brightness down to 0 when the sensor says nobody is there, and back up when
+  you return or touch a key. Low brightness isn't "display off", so it doesn't throttle.
+- **On battery** it does nothing, so Windows' normal power saving applies.
+
+The tray icon has **Black out now**, **Lock now**, **Pause for 1 hour**, **Settings...**
+and **Open log**. Double-click the icon to black out.
+
+Settings are in `%LOCALAPPDATA%\BlackScreen\auto.ini` (`idle_minutes`, `away_seconds`,
+`lock_minutes`, `wake_on_approach`, `on_battery`), and every decision is logged to
+`auto.log` in the same folder. To start it at sign-in, add it to
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`:
+
+```
+reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v BlackScreenAuto /d "\"C:\path\to\BlackScreen.exe\" --auto"
+```
+
+Without a presence sensor it falls back to the idle timer only.
+
+### The presence sensor is blind in the dark
+
+On our laptop the presence sensor is part of the webcam module and works from the
+normal colour camera, not the IR camera (whose light only comes on for Windows Hello).
+Within a second of the room light going off it reported "not present", and kept
+saying so with someone sitting right there. That's why an "away" blackout also needs
+30 s with no input and no playing video. Otherwise the screen flickered on and off
+every second as each touch brought it back and the next check blacked it out again.
+If you often sit in the dark reading without touching anything, raise `away_seconds`.
 
 ### Optional: a hotkey
 
@@ -95,7 +144,12 @@ With [PowerToys](https://learn.microsoft.com/windows/powertoys/) installed:
 **Keyboard Manager → Remap a shortcut → Add**, press **Win+Shift+B**, set the action
 to **Run Program** and point it at `BlackScreen.exe`. (Win+Shift+B isn't used by
 Windows or by PowerToys' defaults. Avoid Win+Ctrl+Shift+B, which resets the graphics
-driver.) Only one copy runs at a time, so pressing it twice is harmless.
+driver.) Only one manual copy runs at a time, so pressing it twice is harmless.
+
+If you also run auto mode, set the shortcut's **If running** option to **Start another**.
+With the default (**Show window**) PowerToys sees the auto-mode `BlackScreen.exe` already
+running, tries to show its window (there isn't one), and the hotkey silently does
+nothing.
 
 If the hotkey does nothing, check the program path in the editor. A leading space
 or trailing full stop picked up by copy-paste breaks it silently. Also note the
@@ -110,7 +164,9 @@ build.cmd
 ```
 
 Produces `BlackScreen.exe` (AnyCPU, runs on x64 and ARM64). `make-icon.ps1` draws the
-icon if `BlackScreen.ico` is missing.
+icon if `BlackScreen.ico` is missing. `build.cmd other.exe` writes to a different name,
+which is handy while the running copy has `BlackScreen.exe` open. The WinRT references
+in `build.cmd` are only for the presence sensor.
 
 ## Notes
 

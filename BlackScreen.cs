@@ -34,8 +34,16 @@ static class Program
     static extern bool SetProcessDPIAware();
 
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
+        if (args.Length > 0 && args[0].Equals("--auto", StringComparison.OrdinalIgnoreCase))
+        {
+            SetProcessDPIAware();
+            Application.EnableVisualStyles();
+            AutoMode.Run();   // resident mode, see AutoMode.cs
+            return;
+        }
+
         bool first;
         using (var mutex = new Mutex(true, "Local\\BlackScreen.SingleInstance", out first))
         {
