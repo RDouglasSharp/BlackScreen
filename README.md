@@ -172,9 +172,10 @@ in `build.cmd` are only for the presence sensor.
 
 - Leave "Detect when other people are looking at my screen" off. BlackScreen doesn't
   override it, and it dims the screen.
-- Vendor features BlackScreen can't control need to stay off. On ASUS, that's
-  **MyASUS → Customization → OLED Care → Pixel Refresh**, which blanks the panel
-  when idle even with Windows' screen saver set to None.
+- ASUS **MyASUS → Customization → OLED Care → Pixel Refresh** can stay on. It's a
+  screen saver that blanks the panel when idle (even with Windows' screen saver set to
+  None), but the display stays powered, so the GPU isn't throttled (tested under a
+  ComfyUI load). It makes a useful burn-in backup if BlackScreen isn't running.
 - Tested on Windows 11 (ARM64) on an ASUS laptop with an RTX Spark N1X. Other
   machines may throttle for different reasons; check your GPU power draw
   (`nvidia-smi`) with the display on and off.
