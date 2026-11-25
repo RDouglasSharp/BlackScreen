@@ -45,10 +45,22 @@ static class AutoMode
     static uint inputAtBlackout, inputAtDim;
     static DateTime lastSensorCheck = DateTime.MinValue;
     public static volatile bool Locked;   // for the sensor's event thread (raw logging)
-    static string lastPresence = "Unknown";
+    static string lastPresence = "Unknown", lastKnownPresence = "Unknown";
     static DateTime awaySince = DateTime.MaxValue;
     static DateTime lastActive = DateTime.Now;
     static Presence sensor;
+    static bool sensorExpected;                       // the PC has a sensor (found at start)
+    static DateTime lastReopen = DateTime.Now;
+    const int ReopenSeconds = 600;                    // re-subscribe after this long without events
+
+    // Drop the subscription and subscribe again: brings a silent sensor back to life.
+    static void ReopenSensor(string why)
+    {
+        lastReopen = DateTime.Now;
+        if (sensor != null) sensor.Close();
+        sensor = Presence.TryOpen();
+        Log("presence sensor reopened (" + why + "): " + (sensor != null ? "available" : "not available"));
+    }
 
     static string Dir
     {
@@ -71,6 +83,7 @@ static class AutoMode
                 IdleMinutes, AwaySeconds, LockMinutes, WakeOnApproach, OnBattery));
 
             sensor = Presence.TryOpen();
+            sensorExpected = sensor != null;
             Log(sensor != null ? "presence sensor: available" : "presence sensor: not available (idle timer only)");
 
             overlay = new Overlay();
@@ -88,8 +101,14 @@ static class AutoMode
                     locked = false; Locked = false; awaySince = DateTime.MaxValue; Log("session unlocked");
                     UndimPanel("unlocked");
                     SetLockScreenTimeout(0, "unlocked");
+                    if (sensorExpected) ReopenSensor("unlocked");
                 }
             });
+            SystemEvents.PowerModeChanged += (s, e) =>
+            {
+                if (e.Mode == PowerModes.Resume && sensorExpected)
+                    overlay.BeginInvoke((MethodInvoker)delegate { ReopenSensor("resumed"); });
+            };
 
             lockScreenTimeout = -1;
             SetLockScreenTimeout(0, "start");   // baseline; also undoes a 1-minute value left by a crash
@@ -186,15 +205,24 @@ static class AutoMode
 
     static void Tick()
     {
+        // A sensor that has gone silent for a long time gets re-subscribed (not while blacked out:
+        // opening can take a few seconds, and input must bring the screen back at once).
+        if (sensorExpected && !overlay.Visible && (DateTime.Now - lastReopen).TotalSeconds >= ReopenSeconds
+            && (sensor == null || sensor.SilentSeconds >= ReopenSeconds))
+            ReopenSensor(sensor == null ? "retry" : "no events for " + (int)(sensor.SilentSeconds / 60) + " min");
+
         string presence = "Unknown", engagement = "Unknown";
         if (sensor != null) sensor.Read(out presence, out engagement);
 
         // Track how long the sensor has reported nobody there.
         if (presence == "NotPresent") { if (awaySince == DateTime.MaxValue) awaySince = DateTime.Now; }
         else awaySince = DateTime.MaxValue;
-        bool cameBack = lastPresence == "NotPresent" && presence == "Present";
+        // "Came back" compares with the last definite reading: a stale sensor turns NotPresent
+        // into Unknown while you're away, and Unknown -> Present must still wake the screen.
+        bool cameBack = lastKnownPresence == "NotPresent" && presence == "Present";
         if (presence != lastPresence) Log("presence: " + lastPresence + " -> " + presence);
         lastPresence = presence;
+        if (presence == "Present" || presence == "NotPresent") lastKnownPresence = presence;
 
         if (locked)
         {
@@ -402,13 +430,21 @@ class Presence
     // The sensor only takes fresh readings while something is subscribed to
     // ReadingChanged. Polling alone returns a stale cached value (seen on the
     // ProArt P16 with Windows' own presence features turned off).
+    // The sensor can also stop sending events altogether (seen for 49 min, and for 2 days
+    // after which the last "Present/Engaged" kept resetting the idle timer, so the screen
+    // never blacked out). While someone is there, gaps between events reach ~2 min, so a
+    // reading older than StaleSeconds is treated as Unknown: the plain idle timer applies.
+    public const int StaleSeconds = 180;
     readonly Windows.Devices.Sensors.HumanPresenceSensor s;
+    readonly Windows.Foundation.TypedEventHandler<Windows.Devices.Sensors.HumanPresenceSensor,
+        Windows.Devices.Sensors.HumanPresenceSensorReadingChangedEventArgs> handler;
     volatile string lastPresence = "Unknown", lastEngagement = "Unknown";
     DateTime lastEvent = DateTime.MinValue;
+    public readonly DateTime Opened = DateTime.Now;
     Presence(Windows.Devices.Sensors.HumanPresenceSensor s)
     {
         this.s = s;
-        s.ReadingChanged += (sender, e) =>
+        handler = (sender, e) =>
         {
             var r = e.Reading;
             if (r == null) return;
@@ -417,6 +453,18 @@ class Presence
             lastEvent = DateTime.Now;
             if (AutoMode.Locked) AutoMode.Log("sensor event: " + Format(r));   // raw, while locked only
         };
+        s.ReadingChanged += handler;
+    }
+
+    // Seconds since the last event (or since opening, if none yet).
+    public double SilentSeconds
+    {
+        get { return (DateTime.Now - (lastEvent == DateTime.MinValue ? Opened : lastEvent)).TotalSeconds; }
+    }
+
+    public void Close()
+    {
+        try { s.ReadingChanged -= handler; } catch (Exception) { }
     }
 
     static string Format(Windows.Devices.Sensors.HumanPresenceSensorReading r)
@@ -454,9 +502,11 @@ class Presence
         presence = "Unknown"; engagement = "Unknown";
         if (lastEvent != DateTime.MinValue)   // live data from the subscription (events may stop while nothing changes)
         {
+            if ((DateTime.Now - lastEvent).TotalSeconds > StaleSeconds) return;   // too old to trust: Unknown
             presence = lastPresence; engagement = lastEngagement;
             return;
         }
+        if ((DateTime.Now - Opened).TotalSeconds > StaleSeconds) return;   // never sent an event: the poll is a stale cache
         try
         {
             var r = s.GetCurrentReading();
