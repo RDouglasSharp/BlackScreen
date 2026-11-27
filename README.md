@@ -12,44 +12,61 @@ test, a GPU job running at ~65 W fell to **~5 W within seconds** of the 2-minute
 display timeout, while still reporting 96% utilisation. The job didn't stop, it just
 crawled. Waking the screen brought it straight back to ~65 W.
 
-### Why: Modern Standby
+### Why: the display turning off, by design
 
-This laptop, like all Windows on ARM laptops and many recent x64 ones, uses
-**Modern Standby** (S0 Low Power Idle) instead of classic S3 sleep. It works like
-a phone: when the display turns off for inactivity, Windows enters standby, and
-the platform cuts power to everything, including a GPU that's busy with your job.
-**This happens even with Sleep set to Never.** On a Modern Standby machine, the
-display timeout is effectively the sleep timeout.
+The trigger is the display turning off for inactivity. On AC power, with Sleep set
+to Never, the GPU goes from P0 to P8 within a second of the screen going off, and
+comes back within seconds of it turning on. The CPU is cut too: in our test it got
+about 40 % less work done while the screen was off.
 
-You can see it in the Windows System event log. From our test (display timeout
-2 min, sleep Never):
+**It isn't Modern Standby.** On this laptop the display-off and Modern Standby
+entry happen at the same moment, so we first blamed standby (and an earlier
+version of this README said so). But with Modern Standby disabled
+(`PlatformAoAcOverride=0`, no Kernel-Power 506 event), the throttle was exactly the
+same:
 
-| Time     | GPU                 | System log (Kernel-Power)                             |
-|----------|---------------------|-------------------------------------------------------|
-| 00:58:44 | 64.6 W, 96 %        |                                                       |
-| 00:58:48 |                     | 506: Entering Modern Standby. Reason: Idle Timeout    |
-| 00:58:50 | **5.3 W, 96 %**     |                                                       |
-| 00:59:12 |                     | 507: Exiting Modern Standby. Reason: Input Touchpad   |
-| 00:59:17 | 56 W → ~65 W        |                                                       |
+| Time     | Event                                   | GPU (96 % busy throughout) |
+|----------|-----------------------------------------|----------------------------|
+| 08:27:50 | display on                              | 55–77 W, ~2,120 MHz        |
+| 08:28:58 | display off (no Modern Standby entry)   |                            |
+| 08:29:01 |                                         | **3.7–7.7 W, ~740 MHz**    |
+| 08:30:00 | display back on                         | 55–75 W from 08:30:02      |
 
-Check your own machine (no admin needed):
+What does and doesn't trigger it, all under a sustained GPU load:
 
-```powershell
-powercfg /a    # "Standby (S0 Low Power Idle)" means Modern Standby
-Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows-Kernel-Power';Id=506,507} -MaxEvents 20 |
-  Format-List TimeCreated,Message
-```
+| Throttles                                         | Doesn't throttle                                  |
+|---------------------------------------------------|---------------------------------------------------|
+| Display off after the idle timeout                | Panel brightness 0 (display still on)             |
+| Display off from "turn off my screen when I leave" | A screen saver with the display still powered    |
+| Lid closed while the display idle timeout is set  | The lock screen with the display on               |
+|                                                   | Lid closed, lid action "Do nothing", display timeout Never |
+
+None of these changed anything: ASUS Sleep Assistant off, Battery Care off, an EC
+reset, Full-speed fan mode, and NVIDIA's "Prefer maximum performance".
+
+**ASUS says it's intended.** We reported it to ASUS with the logs above. After review
+by their R&D team, ASUS replied that the behaviour is "normal and consistent with the
+platform's intended power management design" and "not considered a hardware or
+system abnormality". There's no setting to turn it off. We think slowing a busy
+GPU on AC power with Sleep set to Never is a poor policy, but it's the
+manufacturer's call. A Lenovo RTX Spark owner reported no throttle, so other
+brands may be configured differently.
+
+To check your own machine, run a GPU job, watch `nvidia-smi` (power and clock),
+and let the screen time out.
 
 So a keep-awake tool needs its "keep screen on" option for this. Keeping the
-*display* on is what keeps standby away, and that's why BlackScreen keeps the
+*display* on is what avoids the throttle, and that's why BlackScreen keeps the
 display on but black.
-(Thanks to the Reddit commenter who pointed at Modern Standby.)
 
-Anything that turns the panel off or dims it can do this:
+Anything that turns the panel off can do this:
 
 - Display timeout ("Turn off my screen after…")
-- Presence sensing: "Turn off my screen when I leave", "Dim my screen when I look away"
+- Presence sensing: "Turn off my screen when I leave"
 - Sleep, and screen savers that power the panel down
+
+(BlackScreen also turns off "Dim my screen when I look away" and the dim timeout. We
+didn't test whether dimming alone throttles, and brightness 0 didn't.)
 
 The usual workaround is to switch all of those off and run PowerToys Awake with
 "keep screen on". That works, but it leaves an **OLED screen showing a static image
@@ -85,7 +102,7 @@ active power plan and only while it runs.
 1. Download `BlackScreen.exe` from [Releases](../../releases), or build it (below).
    The exe isn't code-signed, so the first time you run it Windows SmartScreen may
    say "Windows protected your PC". Click **More info → Run anyway**. (Or build it
-   yourself from the ~700 lines of source.)
+   yourself from the ~800 lines of source.)
 2. Start your GPU job, run `BlackScreen.exe`, walk away.
 3. Come back and click (or press Esc).
 
@@ -126,7 +143,10 @@ Settings are in `%LOCALAPPDATA%\BlackScreen\auto.ini` (`idle_minutes`, `away_sec
 reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v BlackScreenAuto /d "\"C:\path\to\BlackScreen.exe\" --auto"
 ```
 
-Without a presence sensor it falls back to the idle timer only.
+Without a presence sensor it falls back to the idle timer only. The sensor can also
+stop reporting without any error (ours went silent for two days). So auto mode ignores
+a reading older than 3 minutes, and reconnects to the sensor after 10 minutes of
+silence and after an unlock or resume.
 
 ### The presence sensor is blind in the dark
 
